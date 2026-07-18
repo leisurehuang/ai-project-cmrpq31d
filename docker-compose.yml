@@ -1,0 +1,57 @@
+# 星星奖励系统 - 容器编排
+# 包含：PostgreSQL + 后端 + Nginx（前端在步骤 2 接入）
+version: '3.8'
+
+services:
+  # ============ 数据库 ============
+  postgres:
+    image: postgres:16-alpine
+    container_name: star_reward_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: star_reward
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============ 后端服务 ============
+  backend:
+    build:
+      context: ./backend
+    container_name: star_reward_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/star_reward?schema=public
+      - JWT_SECRET=production-secret-please-change
+    ports:
+      - "3000:3000"
+
+  # ============ Nginx 反向代理（前端接入后启用）============
+  nginx:
+    image: nginx:alpine
+    container_name: star_reward_nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      # 步骤 2 后再挂载前端构建产物：
+      # - ./frontend/dist:/usr/share/nginx/html:ro
+
+volumes:
+  postgres_data:
