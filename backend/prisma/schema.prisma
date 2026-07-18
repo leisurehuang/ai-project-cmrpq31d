@@ -1,0 +1,137 @@
+// ===================================================================
+// 星星奖励系统 - 数据模型定义（严格对应方案 dataModel）
+// ===================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ 枚举 ============
+
+/// 任务状态：待完成 / 已完成
+enum TaskStatus {
+  PENDING
+  DONE
+}
+
+/// 星星流水类型：任务奖励 / 手动调整 / 兑换扣减
+enum StarLogType {
+  TASK
+  MANUAL
+  REDEEM
+}
+
+/// 兑换订单状态：待交付 / 已交付
+enum RedeemOrderStatus {
+  PENDING_DELIVERY
+  DELIVERED
+}
+
+// ============ 实体 ============
+
+/// 家长账号（系统管理者）
+model Parent {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique @db.VarChar(50)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  pinCodeHash  String   @map("pin_code_hash") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  children Child[]
+
+  @@map("parents")
+}
+
+/// 儿童账号（主要使用者）
+model Child {
+  id         String   @id @default(uuid()) @db.Uuid
+  parentId   String   @map("parent_id") @db.Uuid
+  name       String   @db.VarChar(50)
+  avatarUrl  String?  @map("avatar_url") @db.VarChar(255)
+  /// 当前星星总余额（冗余字段，提升查询性能）
+  totalStars Int      @default(0) @map("total_stars")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  parent   Parent        @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  tasks    Task[]
+  starLogs StarLog[]
+  toys     Toy[]
+  orders   RedeemOrder[]
+
+  @@index([parentId])
+  @@map("children")
+}
+
+/// 固定任务（如：按时起床、完成作业）
+model Task {
+  id        String     @id @default(uuid()) @db.Uuid
+  childId   String     @map("child_id") @db.Uuid
+  title     String     @db.VarChar(100)
+  starValue Int        @map("star_value")
+  status    TaskStatus @default(PENDING)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+
+  @@index([childId, status])
+  @@map("tasks")
+}
+
+/// 星星流水（不可篡改的积分变更记录）
+model StarLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  childId   String      @map("child_id") @db.Uuid
+  /// 变动数额（正数加，负数减）
+  amount    Int
+  reason    String      @db.VarChar(255)
+  type      StarLogType
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+
+  @@index([childId, createdAt])
+  @@map("star_logs")
+}
+
+/// 许愿池玩具（兑换目标）
+model Toy {
+  id            String   @id @default(uuid()) @db.Uuid
+  childId       String   @map("child_id") @db.Uuid
+  name          String   @db.VarChar(100)
+  imageUrl      String?  @map("image_url") @db.VarChar(255)
+  requiredStars Int      @map("required_stars")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  child  Child         @relation(fields: [childId], references: [id], onDelete: Cascade)
+  orders RedeemOrder[]
+
+  @@index([childId])
+  @@map("toys")
+}
+
+/// 兑换订单（儿童发起兑换 -> 家长线下交付）
+model RedeemOrder {
+  id          String            @id @default(uuid()) @db.Uuid
+  childId     String            @map("child_id") @db.Uuid
+  toyId       String            @map("toy_id") @db.Uuid
+  /// 消耗星星数（兑换时快照，防止后续玩具改价影响历史）
+  costStars   Int               @map("cost_stars")
+  status      RedeemOrderStatus @default(PENDING_DELIVERY)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  deliveredAt DateTime?         @map("delivered_at")
+
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+  toy   Toy   @relation(fields: [toyId], references: [id], onDelete: Cascade)
+
+  @@index([childId, status])
+  @@map("redeem_orders")
+}
